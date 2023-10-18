@@ -1,7 +1,9 @@
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::env;
 use std::fmt;
 use std::iter::Iterator;
+use std::rc::Rc;
 
 fn main() {
     let mut args = env::args();
@@ -10,29 +12,16 @@ fn main() {
     }
 
     args.next().unwrap();
-    let mut tokens = tokenize(args.next().unwrap());
+    let tokens = tokenize(args.next().unwrap());
+    let node = parse(tokens);
 
     println!(".intel_syntax noprefix");
     println!(".globl main");
     println!("main:");
-    println!("  mov rax, {}", tokens.pop_front().unwrap());
-    while !tokens.is_empty() {
-        let token = tokens.pop_front().unwrap();
-        match token {
-            Token::Reserved(s) => match s.as_str() {
-                "+" => {
-                    println!("  add rax, {}", tokens.pop_front().unwrap().expect_number());
-                }
-                "-" => {
-                    println!("  sub rax, {}", tokens.pop_front().unwrap().expect_number());
-                }
-                _ => panic!("unexpected reserved token!"),
-            },
-            _ => {
-                panic!("unexpected token!")
-            }
-        }
-    }
+
+    gen(node);
+
+    println!("  pop rax");
     println!("  ret");
 }
 
@@ -60,12 +49,14 @@ impl Token {
     }
 }
 
-fn tokenize(s: String) -> VecDeque<Token> {
+type TokenList = Rc<RefCell<VecDeque<Token>>>;
+
+fn tokenize(s: String) -> TokenList {
     let mut tokens = VecDeque::new();
     let mut iter = s.chars().peekable();
     while let Some(c) = iter.next() {
         match c {
-            '+' | '-' => tokens.push_back(Token::Reserved(c.to_string())),
+            '+' | '-' | '*' | '/' => tokens.push_back(Token::Reserved(c.to_string())),
             _ if c.is_ascii_digit() => {
                 let mut n = Vec::new();
                 n.push(c);
@@ -84,7 +75,131 @@ fn tokenize(s: String) -> VecDeque<Token> {
             _ => panic!("unexpected input!"),
         }
     }
-    tokens
+    Rc::new(RefCell::new(tokens))
+}
+
+enum Node {
+    Add(Box<Node>, Box<Node>),
+    Sub(Box<Node>, Box<Node>),
+    Mul(Box<Node>, Box<Node>),
+    Div(Box<Node>, Box<Node>),
+    Num(u32),
+}
+
+fn parse(tokens: TokenList) -> Node {
+    expr(tokens)
+}
+
+// expr = mul ("+" mul | "-" mul)
+fn expr(tokens: TokenList) -> Node {
+    let mut node = mul(tokens.clone());
+
+    loop {
+        let token = (*tokens).borrow_mut().pop_front();
+        match token {
+            Some(Token::Reserved(s)) => match s.as_str() {
+                "+" => node = Node::Add(Box::new(node), Box::new(mul(tokens.clone()))),
+                "-" => node = Node::Sub(Box::new(node), Box::new(mul(tokens.clone()))),
+                _ => break,
+            },
+            _ => break,
+        }
+
+        let token = (*tokens).borrow_mut().pop_front();
+        match token {
+            Some(Token::Reserved(s)) => match s.as_str() {
+                "+" => node = Node::Add(Box::new(node), Box::new(mul(tokens.clone()))),
+                "-" => node = Node::Sub(Box::new(node), Box::new(mul(tokens.clone()))),
+                _ => break,
+            },
+            _ => break,
+        }
+    }
+
+    node
+}
+
+// mul = primary ("*" primary | "/" primary)
+fn mul(tokens: TokenList) -> Node {
+    let mut node = primary(tokens.clone());
+
+    loop {
+        match (*tokens).borrow_mut().front() {
+            Some(Token::Reserved(s)) => match s.as_str() {
+                "*" | "/" => {}
+                _ => break,
+            },
+            _ => break,
+        }
+
+        let token = (*tokens).borrow_mut().pop_front();
+        match token {
+            Some(Token::Reserved(s)) => match s.as_str() {
+                "*" => node = Node::Mul(Box::new(node), Box::new(primary(tokens.clone()))),
+                "/" => node = Node::Div(Box::new(node), Box::new(primary(tokens.clone()))),
+                _ => break,
+            },
+            _ => break,
+        }
+    }
+
+    node
+}
+
+// primary = num
+fn primary(tokens: TokenList) -> Node {
+    let token = (*tokens).borrow_mut().pop_front().unwrap();
+    let n = token.expect_number();
+    Node::Num(n)
+}
+
+fn gen(node: Node) {
+    match node {
+        Node::Num(n) => {
+            println!("  push {}", n);
+            return;
+        }
+        _ => {}
+    }
+
+    match node {
+        Node::Add(l, r) => {
+            gen(*l);
+            gen(*r);
+
+            println!("  pop rdi");
+            println!("  pop rax");
+            println!("  add rax, rdi");
+        }
+        Node::Sub(l, r) => {
+            gen(*l);
+            gen(*r);
+
+            println!("  pop rdi");
+            println!("  pop rax");
+            println!("  sub rax, rdi");
+        }
+        Node::Mul(l, r) => {
+            gen(*l);
+            gen(*r);
+
+            println!("  pop rdi");
+            println!("  pop rax");
+            println!("  imul rax, rdi");
+        }
+        Node::Div(l, r) => {
+            gen(*l);
+            gen(*r);
+
+            println!("  pop rdi");
+            println!("  pop rax");
+            println!("  cqo");
+            println!("  idiv rdi");
+        }
+        _ => {}
+    }
+
+    println!("  push rax");
 }
 
 #[cfg(test)]
@@ -94,15 +209,15 @@ mod tests {
     #[test]
     fn test_tokenize() {
         let input = "3".to_string();
-        let tokens = tokenize(input);
+        let tokens = (*tokenize(input)).take();
         assert_eq!(tokens, vec![Token::Num(3)]);
 
         let input = "13".to_string();
-        let tokens = tokenize(input);
+        let tokens = (*tokenize(input)).take();
         assert_eq!(tokens, vec![Token::Num(13)]);
 
         let input = "3+14".to_string();
-        let tokens = tokenize(input);
+        let tokens = (*tokenize(input)).take();
         assert_eq!(
             tokens,
             vec![
@@ -113,7 +228,7 @@ mod tests {
         );
 
         let input = "3 + 14 - 1".to_string();
-        let tokens = tokenize(input);
+        let tokens = (*tokenize(input)).take();
         assert_eq!(
             tokens,
             vec![
@@ -121,6 +236,19 @@ mod tests {
                 Token::Reserved("+".to_string()),
                 Token::Num(14),
                 Token::Reserved("-".to_string()),
+                Token::Num(1)
+            ]
+        );
+
+        let input = "3 * 14 / 1".to_string();
+        let tokens = (*tokenize(input)).take();
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Num(3),
+                Token::Reserved("*".to_string()),
+                Token::Num(14),
+                Token::Reserved("/".to_string()),
                 Token::Num(1)
             ]
         );
