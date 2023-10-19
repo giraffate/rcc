@@ -41,6 +41,7 @@ impl fmt::Display for Token {
 }
 
 impl Token {
+    #[allow(dead_code)]
     fn expect_number(&self) -> u32 {
         match self {
             Token::Num(n) => *n,
@@ -56,7 +57,7 @@ fn tokenize(s: String) -> TokenList {
     let mut iter = s.chars().peekable();
     while let Some(c) = iter.next() {
         match c {
-            '+' | '-' | '*' | '/' => tokens.push_back(Token::Reserved(c.to_string())),
+            '+' | '-' | '*' | '/' | '(' | ')' => tokens.push_back(Token::Reserved(c.to_string())),
             _ if c.is_ascii_digit() => {
                 let mut n = Vec::new();
                 n.push(c);
@@ -78,6 +79,7 @@ fn tokenize(s: String) -> TokenList {
     Rc::new(RefCell::new(tokens))
 }
 
+#[derive(Clone, Debug)]
 enum Node {
     Add(Box<Node>, Box<Node>),
     Sub(Box<Node>, Box<Node>),
@@ -95,11 +97,9 @@ fn expr(tokens: TokenList) -> Node {
     let mut node = mul(tokens.clone());
 
     loop {
-        let token = (*tokens).borrow_mut().pop_front();
-        match token {
+        match (*tokens).borrow_mut().front() {
             Some(Token::Reserved(s)) => match s.as_str() {
-                "+" => node = Node::Add(Box::new(node), Box::new(mul(tokens.clone()))),
-                "-" => node = Node::Sub(Box::new(node), Box::new(mul(tokens.clone()))),
+                "+" | "-" => {}
                 _ => break,
             },
             _ => break,
@@ -146,11 +146,35 @@ fn mul(tokens: TokenList) -> Node {
     node
 }
 
-// primary = num
+// primary = num | "(" expr ")"
 fn primary(tokens: TokenList) -> Node {
+    match (*tokens).borrow_mut().front() {
+        Some(Token::Reserved(s)) => match s.as_str() {
+            "(" => {}
+            _ => panic!("unexpected token in primary: {}", s),
+        },
+        Some(Token::Num(_)) => {}
+        _ => panic!("unexpected token in primary"),
+    }
+
     let token = (*tokens).borrow_mut().pop_front().unwrap();
-    let n = token.expect_number();
-    Node::Num(n)
+    let node = match token {
+        Token::Reserved(s) => match s.as_str() {
+            "(" => {
+                let node = expr(tokens.clone());
+                match (*tokens).borrow_mut().pop_front() {
+                    Some(Token::Reserved(s)) => match s.as_str() {
+                        ")" => node,
+                        _ => panic!("unexpected token in primary: {}", s),
+                    },
+                    _ => panic!("unexpected token in primary"),
+                }
+            }
+            _ => panic!("unexpected token in primary"),
+        },
+        Token::Num(n) => Node::Num(n),
+    };
+    node
 }
 
 fn gen(node: Node) {
