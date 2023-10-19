@@ -98,20 +98,18 @@ fn expr(tokens: TokenList) -> Node {
 
     loop {
         match (*tokens).borrow_mut().front() {
-            Some(Token::Reserved(s)) => match s.as_str() {
-                "+" | "-" => {}
-                _ => break,
-            },
+            Some(Token::Reserved(s)) if matches!(s.as_str(), "+" | "-") => {}
             _ => break,
         }
 
         let token = (*tokens).borrow_mut().pop_front();
         match token {
-            Some(Token::Reserved(s)) => match s.as_str() {
-                "+" => node = Node::Add(Box::new(node), Box::new(mul(tokens.clone()))),
-                "-" => node = Node::Sub(Box::new(node), Box::new(mul(tokens.clone()))),
-                _ => break,
-            },
+            Some(Token::Reserved(s)) if matches!(s.as_str(), "+") => {
+                node = Node::Add(Box::new(node), Box::new(mul(tokens.clone())))
+            }
+            Some(Token::Reserved(s)) if matches!(s.as_str(), "-") => {
+                node = Node::Sub(Box::new(node), Box::new(mul(tokens.clone())))
+            }
             _ => break,
         }
     }
@@ -125,20 +123,18 @@ fn mul(tokens: TokenList) -> Node {
 
     loop {
         match (*tokens).borrow_mut().front() {
-            Some(Token::Reserved(s)) => match s.as_str() {
-                "*" | "/" => {}
-                _ => break,
-            },
+            Some(Token::Reserved(s)) if matches!(s.as_str(), "*" | "/") => {}
             _ => break,
         }
 
         let token = (*tokens).borrow_mut().pop_front();
         match token {
-            Some(Token::Reserved(s)) => match s.as_str() {
-                "*" => node = Node::Mul(Box::new(node), Box::new(primary(tokens.clone()))),
-                "/" => node = Node::Div(Box::new(node), Box::new(primary(tokens.clone()))),
-                _ => break,
-            },
+            Some(Token::Reserved(s)) if matches!(s.as_str(), "*") => {
+                node = Node::Mul(Box::new(node), Box::new(primary(tokens.clone())))
+            }
+            Some(Token::Reserved(s)) if matches!(s.as_str(), "/") => {
+                node = Node::Div(Box::new(node), Box::new(primary(tokens.clone())))
+            }
             _ => break,
         }
     }
@@ -149,30 +145,22 @@ fn mul(tokens: TokenList) -> Node {
 // primary = num | "(" expr ")"
 fn primary(tokens: TokenList) -> Node {
     match (*tokens).borrow_mut().front() {
-        Some(Token::Reserved(s)) => match s.as_str() {
-            "(" => {}
-            _ => panic!("unexpected token in primary: {}", s),
-        },
+        Some(Token::Reserved(s)) if matches!(s.as_str(), "(") => {}
         Some(Token::Num(_)) => {}
         _ => panic!("unexpected token in primary"),
     }
 
     let token = (*tokens).borrow_mut().pop_front().unwrap();
     let node = match token {
-        Token::Reserved(s) => match s.as_str() {
-            "(" => {
-                let node = expr(tokens.clone());
-                match (*tokens).borrow_mut().pop_front() {
-                    Some(Token::Reserved(s)) => match s.as_str() {
-                        ")" => node,
-                        _ => panic!("unexpected token in primary: {}", s),
-                    },
-                    _ => panic!("unexpected token in primary"),
-                }
+        Token::Reserved(s) if matches!(s.as_str(), "(") => {
+            let node = expr(tokens.clone());
+            match (*tokens).borrow_mut().pop_front() {
+                Some(Token::Reserved(s)) if matches!(s.as_str(), ")") => node,
+                _ => panic!("unexpected token in primary"),
             }
-            _ => panic!("unexpected token in primary"),
-        },
+        }
         Token::Num(n) => Node::Num(n),
+        _ => panic!("unexpected token in primary"),
     };
     node
 }
