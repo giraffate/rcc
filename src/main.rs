@@ -1,9 +1,7 @@
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::env;
 use std::fmt;
 use std::iter::Iterator;
-use std::rc::Rc;
 
 fn main() {
     let mut args = env::args();
@@ -13,7 +11,7 @@ fn main() {
 
     args.next().unwrap();
     let tokens = tokenize(args.next().unwrap());
-    let mut parser = Parser { tokens };
+    let mut parser = Parser::new(tokens);
     let node = parser.parse();
 
     println!(".intel_syntax noprefix");
@@ -89,9 +87,14 @@ enum Node {
 
 struct Parser {
     tokens: VecDeque<Token>,
+    idx: usize,
 }
 
 impl Parser {
+    fn new(tokens: VecDeque<Token>) -> Self {
+        Parser { tokens, idx: 0 }
+    }
+
     fn parse(&mut self) -> Node {
         self.expr()
     }
@@ -101,17 +104,13 @@ impl Parser {
         let mut node = self.mul();
 
         loop {
-            match self.tokens.front() {
-                Some(Token::Reserved(s)) if matches!(s.as_str(), "+" | "-") => {}
-                _ => break,
-            }
-
-            let token = self.tokens.pop_front();
-            match token {
+            match self.tokens.get(self.idx) {
                 Some(Token::Reserved(s)) if matches!(s.as_str(), "+") => {
-                    node = Node::Add(Box::new(node), Box::new(self.mul()))
+                    self.idx += 1;
+                    node = Node::Add(Box::new(node), Box::new(self.mul()));
                 }
                 Some(Token::Reserved(s)) if matches!(s.as_str(), "-") => {
+                    self.idx += 1;
                     node = Node::Sub(Box::new(node), Box::new(self.mul()))
                 }
                 _ => break,
@@ -126,17 +125,13 @@ impl Parser {
         let mut node = self.primary();
 
         loop {
-            match self.tokens.front() {
-                Some(Token::Reserved(s)) if matches!(s.as_str(), "*" | "/") => {}
-                _ => break,
-            }
-
-            let token = self.tokens.pop_front();
-            match token {
+            match self.tokens.get(self.idx) {
                 Some(Token::Reserved(s)) if matches!(s.as_str(), "*") => {
+                    self.idx += 1;
                     node = Node::Mul(Box::new(node), Box::new(self.primary()))
                 }
                 Some(Token::Reserved(s)) if matches!(s.as_str(), "/") => {
+                    self.idx += 1;
                     node = Node::Div(Box::new(node), Box::new(self.primary()))
                 }
                 _ => break,
@@ -148,22 +143,22 @@ impl Parser {
 
     // primary = num | "(" expr ")"
     fn primary(&mut self) -> Node {
-        match self.tokens.front() {
-            Some(Token::Reserved(s)) if matches!(s.as_str(), "(") => {}
-            Some(Token::Num(_)) => {}
-            _ => panic!("unexpected token in primary"),
-        }
-
-        let token = self.tokens.pop_front().unwrap();
-        let node = match token {
-            Token::Reserved(s) if matches!(s.as_str(), "(") => {
+        let node = match self.tokens.get(self.idx) {
+            Some(Token::Reserved(s)) if matches!(s.as_str(), "(") => {
+                self.idx += 1;
                 let node = self.expr();
-                match self.tokens.pop_front() {
-                    Some(Token::Reserved(s)) if matches!(s.as_str(), ")") => node,
+                match self.tokens.get(self.idx) {
+                    Some(Token::Reserved(s)) if matches!(s.as_str(), ")") => {
+                        self.idx += 1;
+                        node
+                    }
                     _ => panic!("unexpected token in primary"),
                 }
             }
-            Token::Num(n) => Node::Num(n),
+            Some(Token::Num(n)) => {
+                self.idx += 1;
+                Node::Num(*n)
+            }
             _ => panic!("unexpected token in primary"),
         };
         node
