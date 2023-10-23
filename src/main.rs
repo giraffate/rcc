@@ -120,25 +120,42 @@ impl Parser {
         node
     }
 
-    // mul = primary ("*" primary | "/" primary)
+    // mul = unary ("*" unary | "/" unary)
     fn mul(&mut self) -> Node {
-        let mut node = self.primary();
+        let mut node = self.unary();
 
         loop {
             match self.tokens.get(self.idx) {
                 Some(Token::Reserved(s)) if matches!(s.as_str(), "*") => {
                     self.idx += 1;
-                    node = Node::Mul(Box::new(node), Box::new(self.primary()))
+                    node = Node::Mul(Box::new(node), Box::new(self.unary()))
                 }
                 Some(Token::Reserved(s)) if matches!(s.as_str(), "/") => {
                     self.idx += 1;
-                    node = Node::Div(Box::new(node), Box::new(self.primary()))
+                    node = Node::Div(Box::new(node), Box::new(self.unary()))
                 }
                 _ => break,
             }
         }
 
         node
+    }
+
+    // unary = ("+" | "-")? unary | primary
+    fn unary(&mut self) -> Node {
+        match self.tokens.get(self.idx) {
+            Some(Token::Reserved(s)) if matches!(s.as_str(), "+") => {
+                self.idx += 1;
+                return self.unary();
+            }
+            Some(Token::Reserved(s)) if matches!(s.as_str(), "-") => {
+                self.idx += 1;
+                return Node::Sub(Box::new(Node::Num(0)), Box::new(self.unary()));
+            }
+            _ => {}
+        }
+
+        self.primary()
     }
 
     // primary = num | "(" expr ")"

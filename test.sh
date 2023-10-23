@@ -2,7 +2,7 @@ assert() {
     expected="$1"
     input="$2"
 
-    cargo run -q "$input" > tmp.s
+    cargo run -q -- "$input" > tmp.s
     cc -o tmp tmp.s
     ./tmp
     actual="$?"
@@ -23,3 +23,6 @@ assert 47 "5+6*7"
 assert 1 "6 / 3 - 1"
 assert 32 "(5+3)*4"
 assert 6 " 12 / ( 3 - 1 ) "
+assert 10 "-10+20"
+assert 10 "- -10"
+assert 10 "- - +10"
