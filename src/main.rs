@@ -51,25 +51,30 @@ impl Token {
 
 fn tokenize(s: String) -> VecDeque<Token> {
     let mut tokens = VecDeque::new();
-    let mut iter = s.chars().peekable();
-    while let Some(c) = iter.next() {
-        match c {
-            '+' | '-' | '*' | '/' | '(' | ')' => tokens.push_back(Token::Reserved(c.to_string())),
+    let v = s.chars().collect::<Vec<_>>();
+    let mut idx = 0;
+    while idx < v.len() {
+        let c = v.get(idx).unwrap();
+        match *c {
+            '+' | '-' | '*' | '/' | '(' | ')' => {
+                idx += 1;
+                tokens.push_back(Token::Reserved(c.to_string()));
+            }
             _ if c.is_ascii_digit() => {
+                idx += 1;
                 let mut n = Vec::new();
-                n.push(c);
-                while let Some(next_c) = iter.peek() {
+                n.push(*c);
+                while let Some(next_c) = v.get(idx) {
                     if !next_c.is_ascii_digit() {
                         break;
                     }
-
-                    let next_c = iter.next().unwrap();
-                    n.push(next_c);
+                    idx += 1;
+                    n.push(*next_c);
                 }
                 let n = n.into_iter().collect::<String>().parse::<u32>().unwrap();
                 tokens.push_back(Token::Num(n));
             }
-            _ if c.is_whitespace() => {}
+            _ if c.is_whitespace() => idx += 1,
             _ => panic!("unexpected input!"),
         }
     }
