@@ -49,14 +49,26 @@ impl Token {
     }
 }
 
+fn matches_two_chars(chars: &[char], idx: usize) -> bool {
+    matches!(
+        chars.get(idx..=idx + 1),
+        Some(&['=', '=']) | Some(&['!', '=']) | Some(&['>', '=']) | Some(&['<', '='])
+    )
+}
+
 fn tokenize(s: String) -> VecDeque<Token> {
     let mut tokens = VecDeque::new();
-    let v = s.chars().collect::<Vec<_>>();
+    let chars = s.chars().collect::<Vec<_>>();
     let mut idx = 0;
-    while idx < v.len() {
-        let c = v.get(idx).unwrap();
+    while idx < chars.len() {
+        let c = chars.get(idx).unwrap();
         match *c {
-            '+' | '-' | '*' | '/' | '(' | ')' => {
+            '=' | '!' | '>' | '<' if matches_two_chars(&chars, idx) => {
+                let s = chars.get(idx..=idx + 1).unwrap().iter().collect::<String>();
+                idx += 2;
+                tokens.push_back(Token::Reserved(s));
+            }
+            '+' | '-' | '*' | '/' | '(' | ')' | '<' | '>' => {
                 idx += 1;
                 tokens.push_back(Token::Reserved(c.to_string()));
             }
@@ -64,7 +76,7 @@ fn tokenize(s: String) -> VecDeque<Token> {
                 idx += 1;
                 let mut n = Vec::new();
                 n.push(*c);
-                while let Some(next_c) = v.get(idx) {
+                while let Some(next_c) = chars.get(idx) {
                     if !next_c.is_ascii_digit() {
                         break;
                     }
@@ -87,6 +99,10 @@ enum Node {
     Sub(Box<Node>, Box<Node>),
     Mul(Box<Node>, Box<Node>),
     Div(Box<Node>, Box<Node>),
+    Eq(Box<Node>, Box<Node>), // ==
+    Ne(Box<Node>, Box<Node>), // !=
+    Lt(Box<Node>, Box<Node>), // <
+    Le(Box<Node>, Box<Node>), // <=
     Num(u32),
 }
 
@@ -104,8 +120,63 @@ impl Parser {
         self.expr()
     }
 
-    // expr = mul ("+" mul | "-" mul)
+    // expr = equality
     fn expr(&mut self) -> Node {
+        self.equality()
+    }
+
+    // equality = relational ("==" relational | "!=" relational)*
+    fn equality(&mut self) -> Node {
+        let mut node = self.relational();
+
+        loop {
+            match self.tokens.get(self.idx) {
+                Some(Token::Reserved(s)) if matches!(s.as_str(), "==") => {
+                    self.idx += 1;
+                    node = Node::Eq(Box::new(node), Box::new(self.relational()));
+                }
+                Some(Token::Reserved(s)) if matches!(s.as_str(), "!=") => {
+                    self.idx += 1;
+                    node = Node::Ne(Box::new(node), Box::new(self.relational()))
+                }
+                _ => break,
+            }
+        }
+
+        node
+    }
+
+    // relational = add ("<" add | "<=" add | ">" add | ">=" add)*
+    fn relational(&mut self) -> Node {
+        let mut node = self.add();
+
+        loop {
+            match self.tokens.get(self.idx) {
+                Some(Token::Reserved(s)) if matches!(s.as_str(), "<") => {
+                    self.idx += 1;
+                    node = Node::Lt(Box::new(node), Box::new(self.add()));
+                }
+                Some(Token::Reserved(s)) if matches!(s.as_str(), "<=") => {
+                    self.idx += 1;
+                    node = Node::Le(Box::new(node), Box::new(self.mul()))
+                }
+                Some(Token::Reserved(s)) if matches!(s.as_str(), ">") => {
+                    self.idx += 1;
+                    node = Node::Lt(Box::new(self.add()), Box::new(node));
+                }
+                Some(Token::Reserved(s)) if matches!(s.as_str(), ">=") => {
+                    self.idx += 1;
+                    node = Node::Le(Box::new(self.add()), Box::new(node))
+                }
+                _ => break,
+            }
+        }
+
+        node
+    }
+
+    // add = mul ("+" mul | "-" mul)
+    fn add(&mut self) -> Node {
         let mut node = self.mul();
 
         loop {
@@ -200,35 +271,75 @@ fn gen(node: Node) {
         Node::Add(l, r) => {
             gen(*l);
             gen(*r);
-
             println!("  pop rdi");
             println!("  pop rax");
+
             println!("  add rax, rdi");
         }
         Node::Sub(l, r) => {
             gen(*l);
             gen(*r);
-
             println!("  pop rdi");
             println!("  pop rax");
+
             println!("  sub rax, rdi");
         }
         Node::Mul(l, r) => {
             gen(*l);
             gen(*r);
-
             println!("  pop rdi");
             println!("  pop rax");
+
             println!("  imul rax, rdi");
         }
         Node::Div(l, r) => {
             gen(*l);
             gen(*r);
-
             println!("  pop rdi");
             println!("  pop rax");
+
             println!("  cqo");
             println!("  idiv rdi");
+        }
+        Node::Eq(l, r) => {
+            gen(*l);
+            gen(*r);
+            println!("  pop rdi");
+            println!("  pop rax");
+
+            println!("  cmp rax, rdi");
+            println!("  sete al");
+            println!("  movzb rax, al");
+        }
+        Node::Ne(l, r) => {
+            gen(*l);
+            gen(*r);
+            println!("  pop rdi");
+            println!("  pop rax");
+
+            println!("  cmp rax, rdi");
+            println!("  setne al");
+            println!("  movzb rax, al");
+        }
+        Node::Lt(l, r) => {
+            gen(*l);
+            gen(*r);
+            println!("  pop rdi");
+            println!("  pop rax");
+
+            println!("  cmp rax, rdi");
+            println!("  setl al");
+            println!("  movzb rax, al");
+        }
+        Node::Le(l, r) => {
+            gen(*l);
+            gen(*r);
+            println!("  pop rdi");
+            println!("  pop rax");
+
+            println!("  cmp rax, rdi");
+            println!("  setle al");
+            println!("  movzb rax, al");
         }
         _ => {}
     }
@@ -239,6 +350,27 @@ fn gen(node: Node) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_matches_two_char() {
+        let chars = "==".chars().collect::<Vec<char>>();
+        assert!(matches_two_chars(&chars, 0));
+
+        let chars = "!=".chars().collect::<Vec<char>>();
+        assert!(matches_two_chars(&chars, 0));
+
+        let chars = "<=".chars().collect::<Vec<char>>();
+        assert!(matches_two_chars(&chars, 0));
+
+        let chars = ">=".chars().collect::<Vec<char>>();
+        assert!(matches_two_chars(&chars, 0));
+
+        let chars = "!!".chars().collect::<Vec<char>>();
+        assert!(!matches_two_chars(&chars, 0));
+
+        let chars = "<>".chars().collect::<Vec<char>>();
+        assert!(!matches_two_chars(&chars, 0));
+    }
 
     #[test]
     fn test_tokenize() {
